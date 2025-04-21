@@ -10,7 +10,7 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")  // Correcto: & a &
          .replace(/</g, "<")   // Correcto: < a <
          .replace(/>/g, ">")   // Correcto: > a >
-         .replace(/"/g, """) // Correcto: " a "
+         .replace(/"/g, "") // Correcto: " a "
          .replace(/'/g, "'"); // Correcto: ' a ' (o ')
 }
 
