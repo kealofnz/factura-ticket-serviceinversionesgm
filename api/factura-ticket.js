@@ -2,16 +2,18 @@
 const { query } = require('./_utils/db'); // Importar la utilidad de DB
 
 // Función para escapar HTML básico (prevenir inyección simple si los datos tuvieran < o >)
+// VERSIÓN CORREGIDA
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
          .toString()
-         .replace(/&/g, "&")
-         .replace(/</g, "<")
-         .replace(/>/g, ">")
-         .replace(/"/g, """)
-         .replace(/'/g, "'");
+         .replace(/&/g, "&")  // Correcto: & a &
+         .replace(/</g, "<")   // Correcto: < a <
+         .replace(/>/g, ">")   // Correcto: > a >
+         .replace(/"/g, """) // Correcto: " a "
+         .replace(/'/g, "'"); // Correcto: ' a ' (o ')
 }
+
 
 module.exports = async (req, res) => {
     // --- SOLO GET --- (AppSheet abrirá esto como una URL GET)
@@ -86,6 +88,7 @@ module.exports = async (req, res) => {
         const horaVenta = saleData['HORA VENTA'] || ''; // Asume formato HH:MM:SS o similar
 
         // --- CONSTRUIR HTML FINAL ---
+        // (El resto del código HTML que tenías antes)
         const htmlContent = `
 <!DOCTYPE html>
 <html lang="es">
