@@ -7,11 +7,11 @@ function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
          .toString()
-         .replace(/&/g, "&")  // Correcto: & a &
-         .replace(/</g, "<")   // Correcto: < a <
-         .replace(/>/g, ">")   // Correcto: > a >
-         .replace(/"/g, """) // Correcto: " a "
-         .replace(/'/g, "'"); // Correcto: ' a ' (o ')
+         .replace(/&/g, "&")  // Correcto
+         .replace(/</g, "<")   // Correcto
+         .replace(/>/g, ">")   // Correcto
+         .replace(/"/g, """) // Correcto
+         .replace(/'/g, "'"); // Correcto
 }
 
 
