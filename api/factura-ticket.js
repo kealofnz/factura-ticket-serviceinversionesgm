@@ -1,6 +1,7 @@
 // api/factura-ticket.js
-const { query } = require('./_utils/db');
+const { query } = require('./_utils/db'); // Importar la utilidad de DB
 
+// Función para escapar HTML básico (VERSIÓN CORRECTA con entidades HTML)
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
@@ -8,29 +9,42 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, "") // Mantenido según solicitud
+         .replace(/"/g, """)
          .replace(/'/g, "'");
 }
 
 module.exports = async (req, res) => {
+    // --- SOLO GET ---
     if (req.method !== 'GET') {
         res.setHeader('Allow', ['GET']);
         return res.status(405).send('Method Not Allowed');
     }
 
+    // --- OBTENER ID DE VENTA ---
     const { id } = req.query;
     if (!id) {
+        console.error("[Factura Ticket] Solicitud sin parámetro 'id'");
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         return res.status(400).send('Error: Falta el parámetro "id" (ID de Venta) en la URL.');
     }
     const saleId = id;
+    console.log(`[Factura Ticket] Iniciando generación (Subtotal Bruto) para Venta ID: ${saleId}`);
 
     try {
+        // --- OBTENER DATOS ---
+        // 1. Datos de la Empresa
+        console.log(`[Factura Ticket ${saleId}] Obteniendo datos de la empresa...`);
         const companySql = "SELECT `NOMBRE EMPRESA`, `DIRECCION`, `RTN`, `TELEFONO`, `CORREO`, `PAGINA WEB` FROM `DATOS DE FACTURA` LIMIT 1";
         const companyResults = await query(companySql);
-        if (companyResults.length === 0) throw new Error("No se encontraron datos de la empresa en DATOS DE FACTURA.");
+        if (companyResults.length === 0) {
+            console.error(`[Factura Ticket ${saleId}] Error: No se encontraron datos en DATOS DE FACTURA.`);
+            throw new Error("No se encontraron datos de la empresa en DATOS DE FACTURA.");
+        }
         const companyData = companyResults[0];
+        console.log(`[Factura Ticket ${saleId}] Datos de empresa obtenidos.`);
 
+        // 2. Datos de la Venta y Cliente (Incluyendo DESCUENTO global de VENTA)
+        console.log(`[Factura Ticket ${saleId}] Obteniendo datos de venta y cliente...`);
         const saleSql = `
             SELECT
                 v.*,
@@ -42,10 +56,17 @@ module.exports = async (req, res) => {
             LEFT JOIN CLIENTES c ON v.\`ID CLIENTE\` = c.\`ID CLIENTE\`
             WHERE v.\`ID VENTA\` = ?`;
         const saleResults = await query(saleSql, [saleId]);
-        if (saleResults.length === 0) throw new Error(`Venta con ID ${saleId} no encontrada.`);
+        if (saleResults.length === 0) {
+            console.error(`[Factura Ticket ${saleId}] Error: Venta no encontrada.`);
+            throw new Error(`Venta con ID ${saleId} no encontrada.`);
+        }
         const saleData = saleResults[0];
         const descuentoGlobalVenta = parseFloat(saleData.DESCUENTO_GLOBAL || 0);
+        console.log(`[Factura Ticket ${saleId}] Datos de venta obtenidos. Descuento global: ${descuentoGlobalVenta}`);
 
+
+        // 3. Detalles de la Venta y Productos
+        console.log(`[Factura Ticket ${saleId}] Obteniendo detalles de venta y productos...`);
         const detailsSql = `
             SELECT d.*, p.\`NOMBRE PRODUCTO\`
             FROM \`DETALLE VENTA\` d
@@ -53,20 +74,28 @@ module.exports = async (req, res) => {
             WHERE d.\`ID VENTA\` = ?`;
         const detailsResults = await query(detailsSql, [saleId]);
         const detailsData = detailsResults;
+        console.log(`[Factura Ticket ${saleId}] Obtenidos ${detailsData.length} detalles.`);
 
-        let subTotalNetoCalculado = 0;
-        let descuentoItemsCalculado = 0;
+
+        // --- PROCESAR Y CALCULAR (Mostrar Subtotal Bruto) ---
+        console.log(`[Factura Ticket ${saleId}] Calculando totales...`);
+        let subTotalBrutoCalculado = 0;     // Suma de (cantidad * precio) - PARA MOSTRAR
+        let descuentoItemsCalculado = 0;    // Suma de descuentos de items
+        let subTotalNetoCalculado = 0;      // Suma de (cantidad * precio - descuentoItem) - PARA CÁLCULO FINAL
         let filasHtml = '';
 
-        detailsData.forEach(item => {
+        detailsData.forEach((item, index) => {
             const cantidad = parseFloat(item.CANTIDAD || 0);
             const precioUnitario = parseFloat(item['PRECIO UNITARIO'] || 0);
             const descuentoItem = parseFloat(item.DESCUENTO || 0);
-            const subtotalItemNeto = (cantidad * precioUnitario) - descuentoItem;
+            const totalBrutoItem = (cantidad * precioUnitario);
+            const subtotalItemNeto = totalBrutoItem - descuentoItem;
 
-            descuentoItemsCalculado += descuentoItem;
-            subTotalNetoCalculado += subtotalItemNeto;
+            subTotalBrutoCalculado += totalBrutoItem; // Acumular bruto
+            descuentoItemsCalculado += descuentoItem;    // Acumular descuento de item
+            subTotalNetoCalculado += subtotalItemNeto;  // Acumular subtotal neto de items
 
+            // Crear fila HTML (5 columnas)
             filasHtml += `
                 <tr class="item">
                     <td>${escapeHtml(item['NOMBRE PRODUCTO'] || item.ID_PRODUCTO)}</td>
@@ -78,10 +107,17 @@ module.exports = async (req, res) => {
             `;
         });
 
+        // Calcular el Total Venta final (Subtotal Neto - Descuento Global)
         const totalVentaFinal = subTotalNetoCalculado - descuentoGlobalVenta;
+        console.log(`[Factura Ticket ${saleId}] Cálculos: SubTotalBruto=${subTotalBrutoCalculado}, DescItems=${descuentoItemsCalculado}, SubTotalNeto=${subTotalNetoCalculado}, DescGlobal=${descuentoGlobalVenta}, TotalFinal=${totalVentaFinal}`);
+
+
+        // Formatear Fecha y Hora
         const fechaVenta = saleData['FECHA DE VENTA'] ? new Date(saleData['FECHA DE VENTA']).toLocaleDateString('es-ES') : 'N/A';
         const horaVenta = saleData['HORA VENTA'] || '';
 
+        // --- CONSTRUIR HTML FINAL ---
+        console.log(`[Factura Ticket ${saleId}] Construyendo HTML...`);
         const htmlContent = `
 <!DOCTYPE html>
 <html lang="es">
@@ -99,12 +135,13 @@ module.exports = async (req, res) => {
     .invoice-box table tr.total td:last-child{font-weight:bold;}
     .invoice-box table tr.total td, .invoice-box table tr.desc td {border-top:1px dashed #000; padding-top: 3px;}
     .centered-info, .message{text-align:center;margin:4px 0;}
-    td:nth-child(1) { width: 35%; }
-    td:nth-child(2) { width: 15%; text-align: center; }
-    td:nth-child(3) { width: 15%; text-align: right; }
-    td:nth-child(4) { width: 15%; text-align: right; }
-    td:nth-child(5) { width: 20%; text-align: right; }
+    td:nth-child(1) { width: 35%; } /* Descrip */
+    td:nth-child(2) { width: 15%; text-align: center; } /* Cant */
+    td:nth-child(3) { width: 15%; text-align: right; } /* Prec */
+    td:nth-child(4) { width: 15%; text-align: right; } /* Desc */
+    td:nth-child(5) { width: 20%; text-align: right; } /* Total */
     tfoot td { padding-top: 3px; }
+
     @media print{
       @page {size: 58mm auto; margin: 0;}
       body{width:58mm;margin:0;padding:0;-webkit-print-color-adjust: exact;}
@@ -123,12 +160,15 @@ module.exports = async (req, res) => {
       Correo: <span id="factcorreo">${escapeHtml(companyData['CORREO'])}</span><br>
       Web: <span id="factweb">${escapeHtml(companyData['PAGINA WEB'])}</span>
     </div>
+
     <div class="centered-info" id="codigo">RECIBO #${escapeHtml(saleId)}<br>${fechaVenta} ${horaVenta}</div>
+
     <div class="centered-info">
       Cliente: <span id="nomcliente">${escapeHtml(saleData['CLIENTE'] || 'N/A')}</span><br>
       <span id="direccioncliente">${escapeHtml(saleData['DIRECCION_CLIENTE'] || '')}</span><br>
       Tel: <span id="clietelefono">${escapeHtml(saleData['TELEFONO_CLIENTE'] || '')}</span>
     </div>
+
     <table>
       <thead>
         <tr class="heading">
@@ -143,30 +183,45 @@ module.exports = async (req, res) => {
         ${filasHtml}
       </tbody>
       <tfoot>
+        {/* --- PIE DE PÁGINA MOSTRANDO SUBTOTAL BRUTO --- */}
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Sub-Total:</td>
-          <td id="subtotal" style="text-align: right;">${subTotalNetoCalculado.toFixed(2)}</td>
+          {/* Muestra la suma de los totales BRUTOS por línea */}
+          <td id="subtotal" style="text-align: right;">${subTotalBrutoCalculado.toFixed(2)}</td>
         </tr>
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Descuento Items:</td>
+          {/* Muestra la suma de los descuentos aplicados a cada ITEM */}
           <td id="impto" style="text-align: right;">${descuentoItemsCalculado.toFixed(2)}</td>
         </tr>
+        {/* Opcional: Mostrar Descuento Global si es > 0 */}
+         ${descuentoGlobalVenta > 0 ? `
+        <tr class="desc">
+          <td colspan="4" style="text-align:right;">Desc. Global:</td>
+          <td style="text-align: right;">${descuentoGlobalVenta.toFixed(2)}</td>
+        </tr>
+        ` : ''}
         <tr class="total">
           <td colspan="4" style="text-align:right;">Total Venta:</td>
+          {/* Muestra el total FINAL (SubTotalNeto - DescuentoGlobal) */}
           <td id="totalventa" style="text-align: right;">${totalVentaFinal.toFixed(2)}</td>
         </tr>
+         {/* --- FIN PIE DE PÁGINA --- */}
       </tfoot>
     </table>
+
     <div class="message">
       ¡Gracias por su compra!
     </div>
   </div>
+
   <script>
     window.onload = function () {
       try {
+          console.log('[Factura Ticket] Intentando imprimir...');
           window.print();
       } catch(e) {
-          console.error("Error al intentar imprimir automáticamente:", e);
+          console.error("[Factura Ticket] Error al intentar imprimir automáticamente:", e);
           if (!document.getElementById('print-error-msg')) {
               const errorMsg = '<p id="print-error-msg" style="text-align:center; margin-top: 20px;">Error al iniciar impresión automática. Por favor, use la función de impresión de su navegador (Ctrl+P / Cmd+P).</p><button onclick="window.print()">Imprimir Manualmente</button>';
               document.body.insertAdjacentHTML('beforeend', errorMsg);
@@ -193,4 +248,4 @@ module.exports = async (req, res) => {
             </body></html>
         `);
     }
-};
+}; // Fin de module.exports
