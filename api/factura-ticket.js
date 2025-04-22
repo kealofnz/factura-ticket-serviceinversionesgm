@@ -9,7 +9,7 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, "")
+         .replace(/"/g, """)
          .replace(/'/g, "'");
 }
 
@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
         return res.status(400).send('Error: Falta el parámetro "id" (ID de Venta) en la URL.');
     }
     const saleId = id;
-    console.log(`[Factura Ticket] Iniciando generación (Subtotal Bruto) para Venta ID: ${saleId}`);
+    console.log(`[Factura Ticket] Iniciando generación (Formato Referencia) para Venta ID: ${saleId}`);
 
     try {
         // --- OBTENER DATOS ---
@@ -43,15 +43,10 @@ module.exports = async (req, res) => {
         const companyData = companyResults[0];
         console.log(`[Factura Ticket ${saleId}] Datos de empresa obtenidos.`);
 
-        // 2. Datos de la Venta y Cliente (Incluyendo DESCUENTO global de VENTA)
+        // 2. Datos de la Venta y Cliente (No necesitamos el descuento global aquí)
         console.log(`[Factura Ticket ${saleId}] Obteniendo datos de venta y cliente...`);
         const saleSql = `
-            SELECT
-                v.*,
-                v.DESCUENTO as DESCUENTO_GLOBAL,
-                c.CLIENTE,
-                c.DIRECCION as DIRECCION_CLIENTE,
-                c.TELEFONO as TELEFONO_CLIENTE
+            SELECT v.*, c.CLIENTE, c.DIRECCION as DIRECCION_CLIENTE, c.TELEFONO as TELEFONO_CLIENTE
             FROM VENTA v
             LEFT JOIN CLIENTES c ON v.\`ID CLIENTE\` = c.\`ID CLIENTE\`
             WHERE v.\`ID VENTA\` = ?`;
@@ -61,9 +56,7 @@ module.exports = async (req, res) => {
             throw new Error(`Venta con ID ${saleId} no encontrada.`);
         }
         const saleData = saleResults[0];
-        const descuentoGlobalVenta = parseFloat(saleData.DESCUENTO_GLOBAL || 0);
-        console.log(`[Factura Ticket ${saleId}] Datos de venta obtenidos. Descuento global: ${descuentoGlobalVenta}`);
-
+        console.log(`[Factura Ticket ${saleId}] Datos de venta obtenidos.`);
 
         // 3. Detalles de la Venta y Productos
         console.log(`[Factura Ticket ${saleId}] Obteniendo detalles de venta y productos...`);
@@ -77,11 +70,11 @@ module.exports = async (req, res) => {
         console.log(`[Factura Ticket ${saleId}] Obtenidos ${detailsData.length} detalles.`);
 
 
-        // --- PROCESAR Y CALCULAR (Mostrar Subtotal Bruto) ---
+        // --- PROCESAR Y CALCULAR (Para coincidir con Factura Referencia) ---
         console.log(`[Factura Ticket ${saleId}] Calculando totales...`);
-        let subTotalBrutoCalculado = 0;     // Suma de (cantidad * precio) - PARA MOSTRAR
-        let descuentoItemsCalculado = 0;    // Suma de descuentos de items
-        let subTotalNetoCalculado = 0;      // Suma de (cantidad * precio - descuentoItem) - PARA CÁLCULO FINAL
+        let subTotalBrutoCalculado = 0;     // Suma de (cantidad * precio) - Para mostrar como Sub-Total
+        let descuentoItemsCalculado = 0;    // Suma de descuentos de items - Para mostrar como Descuento
+        let totalVentaFinal = 0;            // Suma de (cantidad * precio - descuentoItem) - Para mostrar como Total Venta
         let filasHtml = '';
 
         detailsData.forEach((item, index) => {
@@ -93,7 +86,7 @@ module.exports = async (req, res) => {
 
             subTotalBrutoCalculado += totalBrutoItem; // Acumular bruto
             descuentoItemsCalculado += descuentoItem;    // Acumular descuento de item
-            subTotalNetoCalculado += subtotalItemNeto;  // Acumular subtotal neto de items
+            totalVentaFinal += subtotalItemNeto;  // Acumular subtotal neto de items (este es el Total Venta final deseado)
 
             // Crear fila HTML (5 columnas)
             filasHtml += `
@@ -106,10 +99,7 @@ module.exports = async (req, res) => {
                 </tr>
             `;
         });
-
-        // Calcular el Total Venta final (Subtotal Neto - Descuento Global)
-        const totalVentaFinal = subTotalNetoCalculado - descuentoGlobalVenta;
-        console.log(`[Factura Ticket ${saleId}] Cálculos: SubTotalBruto=${subTotalBrutoCalculado}, DescItems=${descuentoItemsCalculado}, SubTotalNeto=${subTotalNetoCalculado}, DescGlobal=${descuentoGlobalVenta}, TotalFinal=${totalVentaFinal}`);
+        console.log(`[Factura Ticket ${saleId}] Cálculos: SubTotalBruto=${subTotalBrutoCalculado}, DescItems=${descuentoItemsCalculado}, TotalFinal=${totalVentaFinal}`);
 
 
         // Formatear Fecha y Hora
@@ -183,27 +173,21 @@ module.exports = async (req, res) => {
         ${filasHtml}
       </tbody>
       <tfoot>
-        {/* --- PIE DE PÁGINA MOSTRANDO SUBTOTAL BRUTO --- */}
+        {/* --- PIE DE PÁGINA COMO FACTURA REFERENCIA --- */}
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Sub-Total:</td>
           {/* Muestra la suma de los totales BRUTOS por línea */}
           <td id="subtotal" style="text-align: right;">${subTotalBrutoCalculado.toFixed(2)}</td>
         </tr>
         <tr class="desc">
-          <td colspan="4" style="text-align:right;">Descuento Items:</td>
+          <td colspan="4" style="text-align:right;">Descuento:</td>
           {/* Muestra la suma de los descuentos aplicados a cada ITEM */}
           <td id="impto" style="text-align: right;">${descuentoItemsCalculado.toFixed(2)}</td>
         </tr>
-        {/* Opcional: Mostrar Descuento Global si es > 0 */}
-         ${descuentoGlobalVenta > 0 ? `
-        <tr class="desc">
-          <td colspan="4" style="text-align:right;">Desc. Global:</td>
-          <td style="text-align: right;">${descuentoGlobalVenta.toFixed(2)}</td>
-        </tr>
-        ` : ''}
+        {/* NO se muestra descuento global */}
         <tr class="total">
           <td colspan="4" style="text-align:right;">Total Venta:</td>
-          {/* Muestra el total FINAL (SubTotalNeto - DescuentoGlobal) */}
+          {/* Muestra el total NETO (SubTotalBruto - DescuentoItems) */}
           <td id="totalventa" style="text-align: right;">${totalVentaFinal.toFixed(2)}</td>
         </tr>
          {/* --- FIN PIE DE PÁGINA --- */}
@@ -216,10 +200,12 @@ module.exports = async (req, res) => {
   </div>
 
   <script>
+    // Script para imprimir
     window.onload = function () {
       try {
           console.log('[Factura Ticket] Intentando imprimir...');
           window.print();
+          console.log('[Factura Ticket] Diálogo de impresión debería estar abierto.');
       } catch(e) {
           console.error("[Factura Ticket] Error al intentar imprimir automáticamente:", e);
           if (!document.getElementById('print-error-msg')) {
@@ -232,10 +218,12 @@ module.exports = async (req, res) => {
 </body>
 </html>`;
 
+        // --- ENVIAR RESPUESTA HTML ---
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(200).send(htmlContent);
 
     } catch (error) {
+        // Captura de errores
         console.error(`[Factura Ticket ${saleId}] Error capturado en handler:`, error);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(500).send(`
