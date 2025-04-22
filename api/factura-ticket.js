@@ -1,7 +1,6 @@
 // api/factura-ticket.js
-const { query } = require('./_utils/db'); // Importar la utilidad de DB
+const { query } = require('./_utils/db');
 
-// Función para escapar HTML básico (VERSIÓN CORRECTA con entidades HTML)
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
@@ -14,13 +13,11 @@ function escapeHtml(unsafe) {
 }
 
 module.exports = async (req, res) => {
-    // --- SOLO GET ---
     if (req.method !== 'GET') {
         res.setHeader('Allow', ['GET']);
         return res.status(405).send('Method Not Allowed');
     }
 
-    // --- OBTENER ID DE VENTA ---
     const { id } = req.query;
     if (!id) {
         console.error("[Factura Ticket] Solicitud sin parámetro 'id'");
@@ -31,9 +28,6 @@ module.exports = async (req, res) => {
     console.log(`[Factura Ticket] Iniciando generación (Formato Referencia) para Venta ID: ${saleId}`);
 
     try {
-        // --- OBTENER DATOS ---
-        // 1. Datos de la Empresa
-        console.log(`[Factura Ticket ${saleId}] Obteniendo datos de la empresa...`);
         const companySql = "SELECT `NOMBRE EMPRESA`, `DIRECCION`, `RTN`, `TELEFONO`, `CORREO`, `PAGINA WEB` FROM `DATOS DE FACTURA` LIMIT 1";
         const companyResults = await query(companySql);
         if (companyResults.length === 0) {
@@ -43,8 +37,6 @@ module.exports = async (req, res) => {
         const companyData = companyResults[0];
         console.log(`[Factura Ticket ${saleId}] Datos de empresa obtenidos.`);
 
-        // 2. Datos de la Venta y Cliente (No necesitamos el descuento global aquí)
-        console.log(`[Factura Ticket ${saleId}] Obteniendo datos de venta y cliente...`);
         const saleSql = `
             SELECT v.*, c.CLIENTE, c.DIRECCION as DIRECCION_CLIENTE, c.TELEFONO as TELEFONO_CLIENTE
             FROM VENTA v
@@ -58,8 +50,6 @@ module.exports = async (req, res) => {
         const saleData = saleResults[0];
         console.log(`[Factura Ticket ${saleId}] Datos de venta obtenidos.`);
 
-        // 3. Detalles de la Venta y Productos
-        console.log(`[Factura Ticket ${saleId}] Obteniendo detalles de venta y productos...`);
         const detailsSql = `
             SELECT d.*, p.\`NOMBRE PRODUCTO\`
             FROM \`DETALLE VENTA\` d
@@ -69,12 +59,9 @@ module.exports = async (req, res) => {
         const detailsData = detailsResults;
         console.log(`[Factura Ticket ${saleId}] Obtenidos ${detailsData.length} detalles.`);
 
-
-        // --- PROCESAR Y CALCULAR (Para coincidir con Factura Referencia) ---
-        console.log(`[Factura Ticket ${saleId}] Calculando totales...`);
-        let subTotalBrutoCalculado = 0;     // Suma de (cantidad * precio) - Para mostrar como Sub-Total
-        let descuentoItemsCalculado = 0;    // Suma de descuentos de items - Para mostrar como Descuento
-        let totalVentaFinal = 0;            // Suma de (cantidad * precio - descuentoItem) - Para mostrar como Total Venta
+        let subTotalBrutoCalculado = 0;
+        let descuentoItemsCalculado = 0;
+        let totalVentaFinal = 0;
         let filasHtml = '';
 
         detailsData.forEach((item, index) => {
@@ -84,11 +71,10 @@ module.exports = async (req, res) => {
             const totalBrutoItem = (cantidad * precioUnitario);
             const subtotalItemNeto = totalBrutoItem - descuentoItem;
 
-            subTotalBrutoCalculado += totalBrutoItem; // Acumular bruto
-            descuentoItemsCalculado += descuentoItem;    // Acumular descuento de item
-            totalVentaFinal += subtotalItemNeto;  // Acumular subtotal neto de items (este es el Total Venta final deseado)
+            subTotalBrutoCalculado += totalBrutoItem;
+            descuentoItemsCalculado += descuentoItem;
+            totalVentaFinal += subtotalItemNeto;
 
-            // Crear fila HTML (5 columnas)
             filasHtml += `
                 <tr class="item">
                     <td>${escapeHtml(item['NOMBRE PRODUCTO'] || item.ID_PRODUCTO)}</td>
@@ -101,12 +87,9 @@ module.exports = async (req, res) => {
         });
         console.log(`[Factura Ticket ${saleId}] Cálculos: SubTotalBruto=${subTotalBrutoCalculado}, DescItems=${descuentoItemsCalculado}, TotalFinal=${totalVentaFinal}`);
 
-
-        // Formatear Fecha y Hora
         const fechaVenta = saleData['FECHA DE VENTA'] ? new Date(saleData['FECHA DE VENTA']).toLocaleDateString('es-ES') : 'N/A';
         const horaVenta = saleData['HORA VENTA'] || '';
 
-        // --- CONSTRUIR HTML FINAL ---
         console.log(`[Factura Ticket ${saleId}] Construyendo HTML...`);
         const htmlContent = `
 <!DOCTYPE html>
@@ -125,11 +108,11 @@ module.exports = async (req, res) => {
     .invoice-box table tr.total td:last-child{font-weight:bold;}
     .invoice-box table tr.total td, .invoice-box table tr.desc td {border-top:1px dashed #000; padding-top: 3px;}
     .centered-info, .message{text-align:center;margin:4px 0;}
-    td:nth-child(1) { width: 35%; } /* Descrip */
-    td:nth-child(2) { width: 15%; text-align: center; } /* Cant */
-    td:nth-child(3) { width: 15%; text-align: right; } /* Prec */
-    td:nth-child(4) { width: 15%; text-align: right; } /* Desc */
-    td:nth-child(5) { width: 20%; text-align: right; } /* Total */
+    td:nth-child(1) { width: 35%; }
+    td:nth-child(2) { width: 15%; text-align: center; }
+    td:nth-child(3) { width: 15%; text-align: right; }
+    td:nth-child(4) { width: 15%; text-align: right; }
+    td:nth-child(5) { width: 20%; text-align: right; }
     tfoot td { padding-top: 3px; }
 
     @media print{
@@ -173,24 +156,18 @@ module.exports = async (req, res) => {
         ${filasHtml}
       </tbody>
       <tfoot>
-        {/* --- PIE DE PÁGINA COMO FACTURA REFERENCIA --- */}
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Sub-Total:</td>
-          {/* Muestra la suma de los totales BRUTOS por línea */}
           <td id="subtotal" style="text-align: right;">${subTotalBrutoCalculado.toFixed(2)}</td>
         </tr>
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Descuento:</td>
-          {/* Muestra la suma de los descuentos aplicados a cada ITEM */}
           <td id="impto" style="text-align: right;">${descuentoItemsCalculado.toFixed(2)}</td>
         </tr>
-        {/* NO se muestra descuento global */}
         <tr class="total">
           <td colspan="4" style="text-align:right;">Total Venta:</td>
-          {/* Muestra el total NETO (SubTotalBruto - DescuentoItems) */}
           <td id="totalventa" style="text-align: right;">${totalVentaFinal.toFixed(2)}</td>
         </tr>
-         {/* --- FIN PIE DE PÁGINA --- */}
       </tfoot>
     </table>
 
@@ -200,7 +177,6 @@ module.exports = async (req, res) => {
   </div>
 
   <script>
-    // Script para imprimir
     window.onload = function () {
       try {
           console.log('[Factura Ticket] Intentando imprimir...');
@@ -218,12 +194,10 @@ module.exports = async (req, res) => {
 </body>
 </html>`;
 
-        // --- ENVIAR RESPUESTA HTML ---
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(200).send(htmlContent);
 
     } catch (error) {
-        // Captura de errores
         console.error(`[Factura Ticket ${saleId}] Error capturado en handler:`, error);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.status(500).send(`
@@ -236,4 +210,4 @@ module.exports = async (req, res) => {
             </body></html>
         `);
     }
-}; // Fin de module.exports
+};
