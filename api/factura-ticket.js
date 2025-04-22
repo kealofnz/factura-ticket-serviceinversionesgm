@@ -1,7 +1,7 @@
 // api/factura-ticket.js
 const { query } = require('./_utils/db'); // Importar la utilidad de DB
 
-// Función para escapar HTML básico (VERSIÓN CORRECTA)
+// Función para escapar HTML básico (VERSIÓN CORRECTA con entidades HTML)
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
@@ -9,7 +9,7 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, "")
+         .replace(/"/g, """)
          .replace(/'/g, "'");
 }
 
@@ -40,13 +40,15 @@ module.exports = async (req, res) => {
 
         // 2. Datos de la Venta y Cliente
         const saleSql = `
-            SELECT v.*, c.CLIENTE, c.DIRECCION as DIRECCION_CLIENTE, c.TELEFONO as TELEFONO_CLIENTE
+            SELECT v.*, v.DESCUENTO as DESCUENTO_GLOBAL, c.CLIENTE, c.DIRECCION as DIRECCION_CLIENTE, c.TELEFONO as TELEFONO_CLIENTE
             FROM VENTA v
             LEFT JOIN CLIENTES c ON v.\`ID CLIENTE\` = c.\`ID CLIENTE\`
             WHERE v.\`ID VENTA\` = ?`;
         const saleResults = await query(saleSql, [saleId]);
         if (saleResults.length === 0) throw new Error(`Venta con ID ${saleId} no encontrada.`);
         const saleData = saleResults[0];
+        const descuentoGlobalVenta = parseFloat(saleData.DESCUENTO_GLOBAL || 0);
+
 
         // 3. Detalles de la Venta y Productos
         const detailsSql = `
@@ -58,38 +60,38 @@ module.exports = async (req, res) => {
         const detailsData = detailsResults;
 
         // --- PROCESAR Y CALCULAR ---
-        let subTotalBrutoCalculado = 0; // Total ANTES de descuentos de items
-        let descuentoCalculado = 0;    // Suma de descuentos de items
-        let totalCalculado = 0;        // Total FINAL (Subtotal Bruto - Descuento Items)
+        let subTotalNetoCalculado = 0;     // Equivale a AppSheet SUB TOTAL
+        let descuentoItemsCalculado = 0;    // Equivale a AppSheet TOTAL DESCUENTO
         let filasHtml = '';
 
         detailsData.forEach(item => {
             const cantidad = parseFloat(item.CANTIDAD || 0);
             const precioUnitario = parseFloat(item['PRECIO UNITARIO'] || 0);
-            const descuentoItem = parseFloat(item.DESCUENTO || 0); // Descuento de esta línea
-            const totalBrutoItem = (cantidad * precioUnitario);   // Precio x Cantidad
-            const subtotalItem = totalBrutoItem - descuentoItem;  // Total de línea después de descuento
+            const descuentoItem = parseFloat(item.DESCUENTO || 0);
+            const subtotalItemNeto = (cantidad * precioUnitario) - descuentoItem;
 
-            subTotalBrutoCalculado += totalBrutoItem; // Acumular subtotal bruto
-            descuentoCalculado += descuentoItem;    // Acumular descuento de item
-            totalCalculado += subtotalItem;         // Acumular total final
+            descuentoItemsCalculado += descuentoItem;
+            subTotalNetoCalculado += subtotalItemNeto;
 
-            // Crear fila HTML para la tabla del ticket (¡AHORA CON 5 COLUMNAS!)
             filasHtml += `
                 <tr class="item">
                     <td>${escapeHtml(item['NOMBRE PRODUCTO'] || item.ID_PRODUCTO)}</td>
                     <td style="text-align: center;">${cantidad}</td>
                     <td style="text-align: right;">${precioUnitario.toFixed(2)}</td>
-                    <td style="text-align: right;">${descuentoItem.toFixed(2)}</td> {/* Columna Descuento Item */}
-                    <td style="text-align: right;">${subtotalItem.toFixed(2)}</td> {/* Columna Total Item */}
+                    <td style="text-align: right;">${descuentoItem.toFixed(2)}</td>
+                    <td style="text-align: right;">${subtotalItemNeto.toFixed(2)}</td>
                 </tr>
             `;
         });
 
+        // Calcular el Total Venta final (como en AppSheet)
+        const totalVentaFinal = subTotalNetoCalculado - descuentoGlobalVenta;
+
+
         const fechaVenta = saleData['FECHA DE VENTA'] ? new Date(saleData['FECHA DE VENTA']).toLocaleDateString('es-ES') : 'N/A';
         const horaVenta = saleData['HORA VENTA'] || '';
 
-        // --- CONSTRUIR HTML FINAL (CON NUEVA ESTRUCTURA Y ESTILOS) ---
+        // --- CONSTRUIR HTML FINAL (SIN LOS COMENTARIOS INCRUSTADOS) ---
         const htmlContent = `
 <!DOCTYPE html>
 <html lang="es">
@@ -100,25 +102,24 @@ module.exports = async (req, res) => {
   <style>
     body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000;}
     .invoice-box{width:58mm;margin:0 auto;padding:5px;font-size:9.5px;line-height:1.2;color:#000;word-wrap:break-word;}
-    .invoice-box table{width:100%;text-align:left;border-collapse:collapse;table-layout:fixed;} /* table-layout fixed */
+    .invoice-box table{width:100%;text-align:left;border-collapse:collapse;table-layout:fixed;}
     .invoice-box table td{padding:2px 0;vertical-align:top;word-wrap:break-word;}
     .invoice-box table tr.heading td{font-weight:bold;border-top:1px dashed #000;border-bottom:1px dashed #000;}
-    .invoice-box table tr.item td{border-bottom:1px dashed #ddd; padding-top: 3px; padding-bottom: 3px;} /* Más padding en items */
+    .invoice-box table tr.item td{border-bottom:1px dashed #ddd; padding-top: 3px; padding-bottom: 3px;}
     .invoice-box table tr.total td:last-child{font-weight:bold;}
     .invoice-box table tr.total td, .invoice-box table tr.desc td {border-top:1px dashed #000; padding-top: 3px;}
     .centered-info, .message{text-align:center;margin:4px 0;}
-    /* Anchos de columna actualizados */
     td:nth-child(1) { width: 35%; } /* Descrip */
     td:nth-child(2) { width: 15%; text-align: center; } /* Cant */
     td:nth-child(3) { width: 15%; text-align: right; } /* Prec */
     td:nth-child(4) { width: 15%; text-align: right; } /* Desc */
     td:nth-child(5) { width: 20%; text-align: right; } /* Total */
-    tfoot td { padding-top: 3px; } /* Padding en pie */
+    tfoot td { padding-top: 3px; }
 
     @media print{
       @page {size: 58mm auto; margin: 0;}
       body{width:58mm;margin:0;padding:0;-webkit-print-color-adjust: exact;}
-      .invoice-box{padding: 0;border:none;font-size:9.5px; box-shadow: none;} /* Ajustar tamaño fuente si es necesario */
+      .invoice-box{padding: 0;border:none;font-size:9.5px; box-shadow: none;}
       button { display: none; }
     }
   </style>
@@ -142,9 +143,10 @@ module.exports = async (req, res) => {
       Tel: <span id="clietelefono">${escapeHtml(saleData['TELEFONO_CLIENTE'] || '')}</span>
     </div>
 
+    {/* <!-- LOS COMENTARIOS STRAY SE HAN ELIMINADO DE AQUÍ --> */}
+
     <table>
       <thead>
-        {/* Cabecera actualizada con 5 columnas */}
         <tr class="heading">
           <td>Descrip</td>
           <td>Cant</td>
@@ -154,21 +156,26 @@ module.exports = async (req, res) => {
         </tr>
       </thead>
       <tbody id="filas">
-        ${filasHtml} {/* Las filas ya tienen 5 <td> */}
+        ${filasHtml}
       </tbody>
       <tfoot>
-        {/* Pie de página actualizado */}
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Sub-Total</td>
-          <td id="subtotal" style="text-align: right;">${subTotalBrutoCalculado.toFixed(2)}</td>
+          <td id="subtotal" style="text-align: right;">${subTotalNetoCalculado.toFixed(2)}</td>
         </tr>
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Descuento</td>
-          <td id="impto" style="text-align: right;">${descuentoCalculado.toFixed(2)}</td>
+          <td id="impto" style="text-align: right;">${descuentoItemsCalculado.toFixed(2)}</td>
         </tr>
+        ${descuentoGlobalVenta > 0 ? `
+        <tr class="desc">
+          <td colspan="4" style="text-align:right;">Desc. Global</td>
+          <td style="text-align: right;">${descuentoGlobalVenta.toFixed(2)}</td>
+        </tr>
+        ` : ''}
         <tr class="total">
           <td colspan="4" style="text-align:right;">Total Venta</td>
-          <td id="totalventa" style="text-align: right;">${totalCalculado.toFixed(2)}</td>
+          <td id="totalventa" style="text-align: right;">${totalVentaFinal.toFixed(2)}</td>
         </tr>
       </tfoot>
     </table>
@@ -201,6 +208,14 @@ module.exports = async (req, res) => {
         // Captura de errores (sin cambios)
         console.error(`Error generando factura para ID ${saleId}:`, error);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.status(500).send(`... HTML de error ...`); // Mismo HTML de error que antes
+        res.status(500).send(`
+            <html><head><title>Error</title></head>
+            <body style="font-family: sans-serif;">
+                <h1>Error al generar la factura</h1>
+                <p>No se pudo generar la factura para la venta ID: ${escapeHtml(saleId)}</p>
+                <p><strong>Detalle del error:</strong> ${escapeHtml(error.message)}</p>
+                <p>Por favor, contacte al soporte o verifique el ID de venta.</p>
+            </body></html>
+        `);
     }
 };
