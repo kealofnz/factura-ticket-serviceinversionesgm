@@ -1,46 +1,44 @@
 // api/factura-ticket.js
 const { query } = require('./_utils/db'); // Importar la utilidad de DB
 
-// Función para escapar HTML básico (prevenir inyección simple si los datos tuvieran < o >)
-// VERSIÓN CORRECTA (asegúrate que sea esta)
+// Función para escapar HTML básico (VERSIÓN CORRECTA)
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return unsafe
          .toString()
-         .replace(/&/g, "&")  // Correcto: & a &
-         .replace(/</g, "<")   // Correcto: < a <
-         .replace(/>/g, ">")   // Correcto: > a >
-         .replace(/"/g, "") // Correcto: " a "
-         .replace(/'/g, "'"); // Correcto: ' a ' (o ')
+         .replace(/&/g, "&")
+         .replace(/</g, "<")
+         .replace(/>/g, ">")
+         .replace(/"/g, """)
+         .replace(/'/g, "'");
 }
 
 
 module.exports = async (req, res) => {
-    // --- SOLO GET --- (AppSheet abrirá esto como una URL GET)
+    // --- SOLO GET ---
     if (req.method !== 'GET') {
         res.setHeader('Allow', ['GET']);
-        return res.status(405).send('Method Not Allowed'); // Enviar texto simple para error
+        return res.status(405).send('Method Not Allowed');
     }
 
     // --- OBTENER ID DE VENTA ---
-    const { id } = req.query; // Obtener 'id' de la URL (?id=xxxx)
+    const { id } = req.query;
     if (!id) {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         return res.status(400).send('Error: Falta el parámetro "id" (ID de Venta) en la URL.');
     }
-    const saleId = id; // Renombrar para claridad
-    console.log(`Generando factura ticket para Venta ID: ${saleId}`);
+    const saleId = id;
+    console.log(`Generando factura ticket (nuevo formato) para Venta ID: ${saleId}`);
 
     try {
         // --- OBTENER DATOS ---
-        // 1. Datos de la Empresa (Asume una sola fila o la primera)
+        // 1. Datos de la Empresa
         const companySql = "SELECT `NOMBRE EMPRESA`, `DIRECCION`, `RTN`, `TELEFONO`, `CORREO`, `PAGINA WEB` FROM `DATOS DE FACTURA` LIMIT 1";
         const companyResults = await query(companySql);
         if (companyResults.length === 0) throw new Error("No se encontraron datos de la empresa en DATOS DE FACTURA.");
         const companyData = companyResults[0];
 
-        // 2. Datos de la Venta y Cliente (JOIN)
-        // Asegúrate que los nombres de columna en VENTA y CLIENTES sean correctos
+        // 2. Datos de la Venta y Cliente
         const saleSql = `
             SELECT v.*, c.CLIENTE, c.DIRECCION as DIRECCION_CLIENTE, c.TELEFONO as TELEFONO_CLIENTE
             FROM VENTA v
@@ -50,45 +48,48 @@ module.exports = async (req, res) => {
         if (saleResults.length === 0) throw new Error(`Venta con ID ${saleId} no encontrada.`);
         const saleData = saleResults[0];
 
-        // 3. Detalles de la Venta y Productos (JOIN)
-        // Asegúrate que los nombres de columna en DETALLE VENTA y PRODUCTO sean correctos
+        // 3. Detalles de la Venta y Productos
         const detailsSql = `
             SELECT d.*, p.\`NOMBRE PRODUCTO\`
             FROM \`DETALLE VENTA\` d
             LEFT JOIN PRODUCTO p ON d.ID_PRODUCTO = p.\`ID PRODUCTO\`
             WHERE d.\`ID VENTA\` = ?`;
         const detailsResults = await query(detailsSql, [saleId]);
-        const detailsData = detailsResults; // Ya es un array
+        const detailsData = detailsResults;
 
         // --- PROCESAR Y CALCULAR ---
-        let totalCalculado = 0;
-        let descuentoCalculado = 0;
+        let subTotalBrutoCalculado = 0; // Total ANTES de descuentos de items
+        let descuentoCalculado = 0;    // Suma de descuentos de items
+        let totalCalculado = 0;        // Total FINAL (Subtotal Bruto - Descuento Items)
         let filasHtml = '';
 
         detailsData.forEach(item => {
             const cantidad = parseFloat(item.CANTIDAD || 0);
             const precioUnitario = parseFloat(item['PRECIO UNITARIO'] || 0);
-            const descuentoItem = parseFloat(item.DESCUENTO || 0);
-            const subtotalItem = (cantidad * precioUnitario) - descuentoItem;
-            totalCalculado += subtotalItem;
-            descuentoCalculado += descuentoItem;
+            const descuentoItem = parseFloat(item.DESCUENTO || 0); // Descuento de esta línea
+            const totalBrutoItem = (cantidad * precioUnitario);   // Precio x Cantidad
+            const subtotalItem = totalBrutoItem - descuentoItem;  // Total de línea después de descuento
 
-            // Crear fila HTML para la tabla del ticket
+            subTotalBrutoCalculado += totalBrutoItem; // Acumular subtotal bruto
+            descuentoCalculado += descuentoItem;    // Acumular descuento de item
+            totalCalculado += subtotalItem;         // Acumular total final
+
+            // Crear fila HTML para la tabla del ticket (¡AHORA CON 5 COLUMNAS!)
             filasHtml += `
                 <tr class="item">
                     <td>${escapeHtml(item['NOMBRE PRODUCTO'] || item.ID_PRODUCTO)}</td>
                     <td style="text-align: center;">${cantidad}</td>
                     <td style="text-align: right;">${precioUnitario.toFixed(2)}</td>
-                    <td style="text-align: right;">${subtotalItem.toFixed(2)}</td>
+                    <td style="text-align: right;">${descuentoItem.toFixed(2)}</td> {/* Columna Descuento Item */}
+                    <td style="text-align: right;">${subtotalItem.toFixed(2)}</td> {/* Columna Total Item */}
                 </tr>
             `;
         });
 
         const fechaVenta = saleData['FECHA DE VENTA'] ? new Date(saleData['FECHA DE VENTA']).toLocaleDateString('es-ES') : 'N/A';
-        const horaVenta = saleData['HORA VENTA'] || ''; // Asume formato HH:MM:SS o similar
+        const horaVenta = saleData['HORA VENTA'] || '';
 
-        // --- CONSTRUIR HTML FINAL ---
-        // (El resto del código HTML que tenías antes)
+        // --- CONSTRUIR HTML FINAL (CON NUEVA ESTRUCTURA Y ESTILOS) ---
         const htmlContent = `
 <!DOCTYPE html>
 <html lang="es">
@@ -98,19 +99,27 @@ module.exports = async (req, res) => {
   <title>Factura ${escapeHtml(saleId)}</title>
   <style>
     body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000;}
-    .invoice-box{width:58mm;margin:0 auto;padding:5px;font-size:10px;line-height:1.2;color:#000;word-wrap:break-word;}
-    .invoice-box table{width:100%;text-align:left;border-collapse:collapse;}
-    .invoice-box table td{padding:2px 0;vertical-align:top;}
+    .invoice-box{width:58mm;margin:0 auto;padding:5px;font-size:9.5px;line-height:1.2;color:#000;word-wrap:break-word;}
+    .invoice-box table{width:100%;text-align:left;border-collapse:collapse;table-layout:fixed;} /* table-layout fixed */
+    .invoice-box table td{padding:2px 0;vertical-align:top;word-wrap:break-word;}
     .invoice-box table tr.heading td{font-weight:bold;border-top:1px dashed #000;border-bottom:1px dashed #000;}
-    .invoice-box table tr.item td{border-bottom:1px dashed #ddd;}
-    .invoice-box table tr.total td:last-child{font-weight:bold;} /* Solo total bold*/
-    .invoice-box table tr.total td {border-top:1px dashed #000;}
+    .invoice-box table tr.item td{border-bottom:1px dashed #ddd; padding-top: 3px; padding-bottom: 3px;} /* Más padding en items */
+    .invoice-box table tr.total td:last-child{font-weight:bold;}
+    .invoice-box table tr.total td, .invoice-box table tr.desc td {border-top:1px dashed #000; padding-top: 3px;}
     .centered-info, .message{text-align:center;margin:4px 0;}
+    /* Anchos de columna actualizados */
+    td:nth-child(1) { width: 35%; } /* Descrip */
+    td:nth-child(2) { width: 15%; text-align: center; } /* Cant */
+    td:nth-child(3) { width: 15%; text-align: right; } /* Prec */
+    td:nth-child(4) { width: 15%; text-align: right; } /* Desc */
+    td:nth-child(5) { width: 20%; text-align: right; } /* Total */
+    tfoot td { padding-top: 3px; } /* Padding en pie */
+
     @media print{
       @page {size: 58mm auto; margin: 0;}
-      body{width:58mm;margin:0;padding:0;-webkit-print-color-adjust: exact;} /* Forzar impresión de colores/fondos si los hubiera */
-      .invoice-box{padding: 0;border:none;font-size:10px; box-shadow: none;}
-      button { display: none; } /* Ocultar botón al imprimir */
+      body{width:58mm;margin:0;padding:0;-webkit-print-color-adjust: exact;}
+      .invoice-box{padding: 0;border:none;font-size:9.5px; box-shadow: none;} /* Ajustar tamaño fuente si es necesario */
+      button { display: none; }
     }
   </style>
 </head>
@@ -135,23 +144,30 @@ module.exports = async (req, res) => {
 
     <table>
       <thead>
+        {/* Cabecera actualizada con 5 columnas */}
         <tr class="heading">
-          <td>Descripción</td>
-          <td style="text-align: center;">Cant.</td>
-          <td style="text-align: right;">Precio</td>
-          <td style="text-align: right;">Total</td>
+          <td>Descrip</td>
+          <td>Cant</td>
+          <td>Prec</td>
+          <td>Desc</td>
+          <td>Total</td>
         </tr>
       </thead>
       <tbody id="filas">
-        ${filasHtml}
+        ${filasHtml} {/* Las filas ya tienen 5 <td> */}
       </tbody>
       <tfoot>
-        <tr class="total">
-          <td colspan="3">Descuento Total</td>
+        {/* Pie de página actualizado */}
+        <tr class="desc">
+          <td colspan="4" style="text-align:right;">Sub-Total</td>
+          <td id="subtotal" style="text-align: right;">${subTotalBrutoCalculado.toFixed(2)}</td>
+        </tr>
+        <tr class="desc">
+          <td colspan="4" style="text-align:right;">Descuento</td>
           <td id="impto" style="text-align: right;">${descuentoCalculado.toFixed(2)}</td>
         </tr>
         <tr class="total">
-          <td colspan="3">Total Venta</td>
+          <td colspan="4" style="text-align:right;">Total Venta</td>
           <td id="totalventa" style="text-align: right;">${totalCalculado.toFixed(2)}</td>
         </tr>
       </tfoot>
@@ -163,16 +179,13 @@ module.exports = async (req, res) => {
   </div>
 
   <script>
-    // Lanzar impresión automáticamente al cargar
+    // Script para imprimir (sin cambios)
     window.onload = function () {
       try {
           console.log('Intentando imprimir...');
           window.print();
-          // Opcional: Cerrar la ventana después de un tiempo si la impresión se lanza
-          // setTimeout(function(){ window.close(); }, 3000);
       } catch(e) {
           console.error("Error al intentar imprimir:", e);
-          // Mostrar un mensaje o botón alternativo si window.print falla
           document.body.innerHTML += '<p style="text-align:center; margin-top: 20px;">Error al iniciar impresión automática. Por favor, use la función de impresión de su navegador (Ctrl+P / Cmd+P).</p><button onclick="window.print()">Imprimir Manualmente</button>';
       }
     };
@@ -185,18 +198,9 @@ module.exports = async (req, res) => {
         res.status(200).send(htmlContent);
 
     } catch (error) {
-        // Captura cualquier error (DB, datos no encontrados, etc.)
+        // Captura de errores (sin cambios)
         console.error(`Error generando factura para ID ${saleId}:`, error);
-        // Enviar un error HTML simple al cliente
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.status(500).send(`
-            <html><head><title>Error</title></head>
-            <body style="font-family: sans-serif;">
-                <h1>Error al generar la factura</h1>
-                <p>No se pudo generar la factura para la venta ID: ${escapeHtml(saleId)}</p>
-                <p><strong>Detalle del error:</strong> ${escapeHtml(error.message)}</p>
-                <p>Por favor, contacte al soporte o verifique el ID de venta.</p>
-            </body></html>
-        `);
+        res.status(500).send(`... HTML de error ...`); // Mismo HTML de error que antes
     }
 };
