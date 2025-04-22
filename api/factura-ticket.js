@@ -9,7 +9,7 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, """)
+         .replace(/"/g, "")
          .replace(/'/g, "'");
 }
 
