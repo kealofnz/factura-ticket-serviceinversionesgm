@@ -9,7 +9,7 @@ function escapeHtml(unsafe) {
          .replace(/&/g, "&")
          .replace(/</g, "<")
          .replace(/>/g, ">")
-         .replace(/"/g, "")
+         .replace(/"/g, """)
          .replace(/'/g, "'");
 }
 
@@ -92,7 +92,7 @@ module.exports = async (req, res) => {
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    
+    {/* ... (head y style sin cambios) ... */}
      <style>
         /* ... (COPIA LOS ESTILOS COMPLETOS DE TU VERSIÓN ANTERIOR AQUÍ) ... */
          body{font-family:Arial,sans-serif;margin:0;padding:0;background:#fff;color:#000;}
@@ -153,7 +153,7 @@ module.exports = async (req, res) => {
         ${filasHtml}
       </tbody>
       <tfoot>
-        
+        {/* --- PIE DE PÁGINA CORREGIDO --- */}
         <tr class="desc">
           <td colspan="4" style="text-align:right;">Sub-Total:</td>
           {/* Muestra la suma de los totales NETOS por línea */}
@@ -164,13 +164,13 @@ module.exports = async (req, res) => {
           {/* Muestra la suma de los descuentos aplicados a cada ITEM */}
           <td id="impto" style="text-align: right;">${descuentoItemsCalculado.toFixed(2)}</td>
         </tr>
-        
+        {/* YA NO MOSTRAMOS LA LÍNEA DE DESCUENTO GLOBAL EXPLÍCITAMENTE */}
         <tr class="total">
           <td colspan="4" style="text-align:right;">Total Venta:</td>
           {/* Muestra el total FINAL (SubTotalNeto - DescuentoGlobal) */}
           <td id="totalventa" style="text-align: right;">${totalVentaFinal.toFixed(2)}</td>
         </tr>
-         
+         {/* --- FIN PIE DE PÁGINA CORREGIDO --- */}
       </tfoot>
     </table>
 
